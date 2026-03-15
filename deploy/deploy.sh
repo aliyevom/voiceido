@@ -51,21 +51,17 @@ cmd_setup_secrets() {
   echo "Secrets ready. Run: ./deploy/deploy.sh online"
 }
 
-# ---------- offline: stop containers, optionally stop VM (zero cost) ----------
+# ---------- offline: stop VM (zero cost; no SSH needed) ----------
 cmd_offline() {
   VM_STATUS=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --format='get(status)' 2>/dev/null || echo "UNKNOWN")
   if [ "$VM_STATUS" = "TERMINATED" ] || [ "$VM_STATUS" = "STOPPED" ]; then
     echo "VM already stopped. Application offline."
   else
-    set +e
-    gcloud compute ssh "$VM_NAME" $SSH_OPTS --command="cd $APP_DIR && sudo docker compose down 2>/dev/null || true; echo done" 2>/dev/null || true
-    set -e
-    echo "Containers stopped."
-  fi
-  if [ "$STOP_VM" = "true" ]; then
-    if [ "$VM_STATUS" != "TERMINATED" ] && [ "$VM_STATUS" != "STOPPED" ]; then
+    if [ "$STOP_VM" = "true" ]; then
       gcloud compute instances stop "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID"
       echo "VM stopped. Zero cost."
+    else
+      echo "VM still running. Set STOP_VM=true to stop it (e.g. in CI)."
     fi
   fi
 }
@@ -76,12 +72,21 @@ cmd_online() {
   if [ "$VM_STATUS" = "TERMINATED" ] || [ "$VM_STATUS" = "STOPPED" ]; then
     echo "Starting VM..."
     gcloud compute instances start "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID"
-    echo "Waiting 30s for SSH..."
-    sleep 30
+    echo "Waiting 60s for SSH (cold start)..."
+    sleep 60
   fi
-  for i in 1 2 3 4 5 6 7 8 9 10; do
-    if gcloud compute ssh "$VM_NAME" $SSH_OPTS --command="echo ok" 2>/dev/null; then break; fi
-    echo "  SSH not ready ($i/10)..."; sleep 10
+  SSH_OPTS_TIMEOUT="$SSH_OPTS --ssh-flag=-oConnectTimeout=15 --ssh-flag=-oStrictHostKeyChecking=no"
+  for i in $(seq 1 20); do
+    if gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="echo ok" 2>/dev/null; then
+      echo "  SSH ready."
+      break
+    fi
+    echo "  SSH not ready ($i/20)..."
+    if [ "$i" -eq 20 ]; then
+      echo "  SSH did not become ready in time. VM may need longer to boot."
+      exit 1
+    fi
+    sleep 10
   done
 
   # Resolve .env: from env (CI) or Secret Manager (local)
@@ -111,7 +116,7 @@ cmd_online() {
     rm -f "$GCP_JSON_TMP"
   fi
   gcloud compute scp --zone="$ZONE" --project="$PROJECT_ID" "$ENV_TMP" "$VM_NAME:$APP_DIR/.env"
-  gcloud compute ssh "$VM_NAME" $SSH_OPTS --command="
+  gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="
     cd $APP_DIR
     touch gcp-key.json; chmod 600 gcp-key.json
     sudo docker compose up -d --build

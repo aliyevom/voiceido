@@ -21,9 +21,6 @@ on:
           - go-online
           - go-offline
         default: go-online
-  schedule:
-    - cron: '50 12 * * 1-5'
-    - cron: '30 22 * * 1-5'
 
 permissions:
   contents: read
@@ -61,16 +58,7 @@ jobs:
 
       - name: Determine action
         id: decide
-        run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            echo "action=${{ inputs.action }}" >> "$GITHUB_OUTPUT"
-          else
-            case "${{ github.event.schedule }}" in
-              "50 12 * * 1-5") echo "action=go-online" >> "$GITHUB_OUTPUT" ;;
-              "30 22 * * 1-5") echo "action=go-offline" >> "$GITHUB_OUTPUT" ;;
-              *) echo "action=go-offline" >> "$GITHUB_OUTPUT" ;;
-            esac
-          fi
+        run: echo "action=${{ inputs.action }}" >> "$GITHUB_OUTPUT"
 
       - name: Go offline
         if: steps.decide.outputs.action == 'go-offline'
