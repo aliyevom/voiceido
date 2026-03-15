@@ -14,6 +14,10 @@ node_modules/
 .next/
 dist/
 
+# Docs (excluded from repo)
+README.md
+**/README.md
+
 # OS and IDE
 .DS_Store
 *.log
