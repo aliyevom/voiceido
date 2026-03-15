@@ -78,6 +78,9 @@ jobs:
           VM_NAME: ${{ env.VM_NAME }}
           ZONE: ${{ env.VM_ZONE }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_REF: ${{ github.ref }}
+          DEPLOY_CODE: "true"
         run: |
           chmod +x deploy/deploy.sh
           ./deploy/deploy.sh online
@@ -93,3 +96,13 @@ jobs:
             --zone="$VM_ZONE" \
             --project="$GCP_PROJECT_ID" \
             --format="table(name,status,networkInterfaces[0].accessConfigs[0].natIP:label=EXTERNAL_IP)" 2>/dev/null || echo "VM not accessible"
+
+      - name: Container status
+        if: always() && steps.decide.outputs.action == 'go-online'
+        env:
+          GCP_PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
+          VM_NAME: ${{ env.VM_NAME }}
+          VM_ZONE: ${{ env.VM_ZONE }}
+        run: |
+          gcloud compute ssh "$VM_NAME" --zone="$VM_ZONE" --project="$GCP_PROJECT_ID" --quiet \
+            --command="cd ~/voiceido && sudo docker compose ps 2>&1" 2>/dev/null || echo "Could not get container status"

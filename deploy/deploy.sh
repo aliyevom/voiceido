@@ -66,7 +66,7 @@ cmd_offline() {
   fi
 }
 
-# ---------- online: start VM (if stopped), ensure .env, start containers ----------
+# ---------- online: start VM, deploy code (git clone/pull like SyncScribe), .env, start containers ----------
 cmd_online() {
   VM_STATUS=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --format='get(status)' 2>/dev/null || echo "UNKNOWN")
   if [ "$VM_STATUS" = "TERMINATED" ] || [ "$VM_STATUS" = "STOPPED" ]; then
@@ -89,20 +89,16 @@ cmd_online() {
     sleep 10
   done
 
-  # Ensure app dir exists on VM (e.g. after cold start or fresh VM)
-  gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="mkdir -p $APP_DIR" 2>/dev/null || true
+  # Ensure Docker is running (like SyncScribe)
+  echo "Ensuring Docker is running..."
+  gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="
+    sudo systemctl start docker 2>/dev/null || true
+    sudo systemctl enable docker 2>/dev/null || true
+    sleep 2
+    sudo docker ps >/dev/null 2>&1 && echo '[OK] Docker ready' || echo '[!] Docker may not be ready'
+  " 2>/dev/null || true
 
-  # Deploy app code (like SyncScribe: VM must have backend, frontend, docker-compose, nginx)
-  # From runner we SCP the checked-out repo; ensures go-online works without a prior "full" deploy.
-  echo "Syncing app to VM..."
-  gcloud compute scp --recurse --zone="$ZONE" --project="$PROJECT_ID" \
-    "$VOICEIDO_ROOT/backend" \
-    "$VOICEIDO_ROOT/frontend" \
-    "$VOICEIDO_ROOT/nginx.conf" \
-    "$VOICEIDO_ROOT/docker-compose.yml" \
-    "$VM_NAME:$APP_DIR/"
-
-  # Resolve .env: from env (CI) or Secret Manager (local)
+  # Resolve .env values (from env/CI or Secret Manager)
   OPENROUTER_VAL="${OPENROUTER_API_KEY:-}"
   if [ -z "$OPENROUTER_VAL" ] && [ "$USE_SECRETS" = "1" ]; then
     OPENROUTER_VAL=$(gcloud secrets versions access latest --secret=voiceido-openrouter-api-key --project="$PROJECT_ID" 2>/dev/null) || true
@@ -116,6 +112,40 @@ cmd_online() {
     GCP_PROJECT_VAL=$(gcloud secrets versions access latest --secret=voiceido-gcp-project-id --project="$PROJECT_ID" 2>/dev/null) || echo "$PROJECT_ID"
   fi
 
+  # Deploy code: git clone/pull on VM (like SyncScribe) when in CI; else SCP from local
+  DEPLOY_CODE="${DEPLOY_CODE:-false}"
+  if [ "$DEPLOY_CODE" = "true" ] && [ -n "$GITHUB_REPOSITORY" ]; then
+    BRANCH="${GITHUB_REF#refs/heads/}"
+    BRANCH="${BRANCH#refs/tags/}"
+    BRANCH="${BRANCH:-main}"
+    GITHUB_REPO_URL="https://github.com/$GITHUB_REPOSITORY.git"
+    echo "Deploying code from GitHub: $GITHUB_REPOSITORY branch $BRANCH"
+    gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="
+      set -e
+      if ! command -v git >/dev/null 2>&1; then
+        sudo apt-get update -qq && sudo apt-get install -y -qq git
+      fi
+      if [ ! -d $APP_DIR/.git ]; then
+        echo 'Cloning repository...'
+        rm -rf $APP_DIR
+        git clone --depth 1 --branch $BRANCH $GITHUB_REPO_URL $APP_DIR || git clone --depth 1 --branch main $GITHUB_REPO_URL $APP_DIR
+        echo '[OK] Repository cloned'
+      else
+        echo 'Pulling latest...'
+        (cd $APP_DIR && git fetch origin && git reset --hard origin/$BRANCH 2>/dev/null || git reset --hard origin/main)
+        echo '[OK] Repository updated'
+      fi
+    " || { echo "Git deploy failed."; exit 1; }
+  else
+    echo "Syncing app from local/runner to VM..."
+    gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="mkdir -p $APP_DIR" 2>/dev/null || true
+    gcloud compute scp --recurse --zone="$ZONE" --project="$PROJECT_ID" \
+      "$VOICEIDO_ROOT/backend" "$VOICEIDO_ROOT/frontend" \
+      "$VOICEIDO_ROOT/nginx.conf" "$VOICEIDO_ROOT/docker-compose.yml" \
+      "$VM_NAME:$APP_DIR/"
+  fi
+
+  # Write .env and optional gcp-key.json on VM
   ENV_TMP=$(mktemp)
   trap "rm -f $ENV_TMP" EXIT
   echo "OPENROUTER_API_KEY=$OPENROUTER_VAL" > "$ENV_TMP"
@@ -125,15 +155,17 @@ cmd_online() {
     echo "GCP_CREDENTIALS_PATH=/app/gcp-key.json" >> "$ENV_TMP"
     GCP_JSON_TMP=$(mktemp)
     echo "$GCP_JSON_SECRET" > "$GCP_JSON_TMP"
-    gcloud compute scp --zone="$ZONE" --project="$PROJECT_ID" "$GCP_JSON_TMP" "$VM_NAME:$APP_DIR/gcp-key.json"
+    gcloud compute scp --zone="$ZONE" --project="$PROJECT_ID" "$GCP_JSON_TMP" "$VM_NAME:$APP_DIR/gcp-key.json" 2>/dev/null || true
     rm -f "$GCP_JSON_TMP"
   fi
   gcloud compute scp --zone="$ZONE" --project="$PROJECT_ID" "$ENV_TMP" "$VM_NAME:$APP_DIR/.env"
+
+  echo "Starting containers..."
   gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="
     cd $APP_DIR
-    touch gcp-key.json; chmod 600 gcp-key.json
+    touch gcp-key.json 2>/dev/null; chmod 600 gcp-key.json 2>/dev/null
     sudo docker compose up -d --build
-  "
+  " || { echo "Docker compose failed."; exit 1; }
   EXTERNAL_IP=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
   echo "Online. Open: http://$EXTERNAL_IP"
 }
