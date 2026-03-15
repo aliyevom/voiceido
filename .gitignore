@@ -3,6 +3,7 @@
 .env.local
 gcp-key.json
 **/gcp-key.json
+github-sa-key.json
 **/ocr-service-account.json
 *.pem
 
