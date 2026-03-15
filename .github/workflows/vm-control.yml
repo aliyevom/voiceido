@@ -1,9 +1,12 @@
 # VoiceIDO VM control: go-online (start VM + app), go-offline (stop VM for zero cost).
 #
-# Setup:
-#   Variables (Settings > Actions > Variables): GCP_PROJECT_ID, VM_NAME (optional), VM_ZONE (optional).
-#   Secrets: OPENROUTER_API_KEY. Optional: GCP_WIF_PROVIDER, GCP_WIF_SERVICE_ACCOUNT for WIF auth.
-#   Grant the WIF service account: roles/compute.instanceAdmin.v1 (or at least compute.instances.get/start/stop + compute.instances.use for SSH).
+# Setup (pick one auth method):
+#   A) Service account key (easiest): Add secret GCP_SA_KEY = full JSON key file contents.
+#      SA needs roles/compute.instanceAdmin.v1 (or compute.instances.get, start, stop, use).
+#   B) Workload Identity Federation: Add secrets GCP_WIF_PROVIDER and GCP_WIF_SERVICE_ACCOUNT.
+#
+#   Variables: GCP_PROJECT_ID. Optional: VM_NAME, VM_ZONE.
+#   For go-online: secret OPENROUTER_API_KEY.
 
 name: VoiceIDO VM Control
 
@@ -19,9 +22,7 @@ on:
           - go-offline
         default: go-online
   schedule:
-    # Weekdays: start at 12:50 UTC (e.g. 7:50 AM EST)
     - cron: '50 12 * * 1-5'
-    # Weekdays: stop at 22:30 UTC (e.g. 5:30 PM EST) for zero cost
     - cron: '30 22 * * 1-5'
 
 permissions:
@@ -40,7 +41,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Authenticate to Google Cloud (SA key)
+        if: vars.USE_WIF != 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
       - name: Authenticate to Google Cloud (WIF)
+        if: vars.USE_WIF == 'true'
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
