@@ -89,6 +89,9 @@ cmd_online() {
     sleep 10
   done
 
+  # Ensure app dir exists on VM (e.g. after cold start or fresh VM)
+  gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="mkdir -p $APP_DIR" 2>/dev/null || true
+
   # Resolve .env: from env (CI) or Secret Manager (local)
   OPENROUTER_VAL="${OPENROUTER_API_KEY:-}"
   if [ -z "$OPENROUTER_VAL" ] && [ "$USE_SECRETS" = "1" ]; then
