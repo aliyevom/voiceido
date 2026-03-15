@@ -92,6 +92,16 @@ cmd_online() {
   # Ensure app dir exists on VM (e.g. after cold start or fresh VM)
   gcloud compute ssh "$VM_NAME" $SSH_OPTS_TIMEOUT --command="mkdir -p $APP_DIR" 2>/dev/null || true
 
+  # Deploy app code (like SyncScribe: VM must have backend, frontend, docker-compose, nginx)
+  # From runner we SCP the checked-out repo; ensures go-online works without a prior "full" deploy.
+  echo "Syncing app to VM..."
+  gcloud compute scp --recurse --zone="$ZONE" --project="$PROJECT_ID" \
+    "$VOICEIDO_ROOT/backend" \
+    "$VOICEIDO_ROOT/frontend" \
+    "$VOICEIDO_ROOT/nginx.conf" \
+    "$VOICEIDO_ROOT/docker-compose.yml" \
+    "$VM_NAME:$APP_DIR/"
+
   # Resolve .env: from env (CI) or Secret Manager (local)
   OPENROUTER_VAL="${OPENROUTER_API_KEY:-}"
   if [ -z "$OPENROUTER_VAL" ] && [ "$USE_SECRETS" = "1" ]; then
