@@ -1,0 +1,19 @@
+# Secrets and keys (do not commit — use Secret Manager in production)
+.env
+.env.local
+gcp-key.json
+**/gcp-key.json
+**/ocr-service-account.json
+*.pem
+
+# Local uploads
+backend/uploads/
+
+# Dependencies and build
+node_modules/
+.next/
+dist/
+
+# OS and IDE
+.DS_Store
+*.log

@@ -1,0 +1,99 @@
+# VoiceIDO VM control: go-online (start VM + app), go-offline (stop VM for zero cost).
+#
+# Setup:
+#   Variables (Settings > Actions > Variables): GCP_PROJECT_ID, VM_NAME (optional), VM_ZONE (optional).
+#   Secrets: OPENROUTER_API_KEY. Optional: GCP_WIF_PROVIDER, GCP_WIF_SERVICE_ACCOUNT for WIF auth.
+#   Grant the WIF service account: roles/compute.instanceAdmin.v1 (or at least compute.instances.get/start/stop + compute.instances.use for SSH).
+
+name: VoiceIDO VM Control
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "VM action"
+        required: true
+        type: choice
+        options:
+          - go-online
+          - go-offline
+        default: go-online
+  schedule:
+    # Weekdays: start at 12:50 UTC (e.g. 7:50 AM EST)
+    - cron: '50 12 * * 1-5'
+    # Weekdays: stop at 22:30 UTC (e.g. 5:30 PM EST) for zero cost
+    - cron: '30 22 * * 1-5'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  GCP_PROJECT_ID: ${{ vars.GCP_PROJECT_ID }}
+  VM_NAME: ${{ vars.VM_NAME || 'voiceido-app' }}
+  VM_ZONE: ${{ vars.VM_ZONE || 'us-central1-a' }}
+
+jobs:
+  vm-control:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud (WIF)
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ secrets.GCP_WIF_PROVIDER }}
+          service_account: ${{ secrets.GCP_WIF_SERVICE_ACCOUNT }}
+          access_token_lifetime: 3600s
+          access_token_scopes: https://www.googleapis.com/auth/cloud-platform
+
+      - name: Setup gcloud
+        uses: google-github-actions/setup-gcloud@v2
+
+      - name: Determine action
+        id: decide
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "action=${{ inputs.action }}" >> "$GITHUB_OUTPUT"
+          else
+            case "${{ github.event.schedule }}" in
+              "50 12 * * 1-5") echo "action=go-online" >> "$GITHUB_OUTPUT" ;;
+              "30 22 * * 1-5") echo "action=go-offline" >> "$GITHUB_OUTPUT" ;;
+              *) echo "action=go-offline" >> "$GITHUB_OUTPUT" ;;
+            esac
+          fi
+
+      - name: Go offline
+        if: steps.decide.outputs.action == 'go-offline'
+        env:
+          PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
+          VM_NAME: ${{ env.VM_NAME }}
+          ZONE: ${{ env.VM_ZONE }}
+          STOP_VM: "true"
+        run: |
+          chmod +x deploy/deploy.sh
+          ./deploy/deploy.sh offline
+
+      - name: Go online
+        if: steps.decide.outputs.action == 'go-online'
+        env:
+          PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
+          VM_NAME: ${{ env.VM_NAME }}
+          ZONE: ${{ env.VM_ZONE }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          chmod +x deploy/deploy.sh
+          ./deploy/deploy.sh online
+
+      - name: VM status
+        if: always()
+        env:
+          GCP_PROJECT_ID: ${{ env.GCP_PROJECT_ID }}
+          VM_NAME: ${{ env.VM_NAME }}
+          VM_ZONE: ${{ env.VM_ZONE }}
+        run: |
+          gcloud compute instances describe "$VM_NAME" \
+            --zone="$VM_ZONE" \
+            --project="$GCP_PROJECT_ID" \
+            --format="table(name,status,networkInterfaces[0].accessConfigs[0].natIP:label=EXTERNAL_IP)" 2>/dev/null || echo "VM not accessible"
