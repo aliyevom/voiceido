@@ -19,7 +19,8 @@ export const config = {
   gcpProjectId: process.env.GCP_PROJECT_ID ?? "",
   openRouterApiKey: process.env.OPENROUTER_API_KEY ?? "",
   openRouterUrl: "https://openrouter.ai/api/v1/chat/completions",
-  analysisModel: process.env.OPENROUTER_MODEL ?? "anthropic/claude-3.5-sonnet",
+  // Default to a widely-available multimodal model; override via OPENROUTER_MODEL.
+  analysisModel: process.env.OPENROUTER_MODEL ?? "openai/gpt-4o-mini",
   uploadDir: process.env.UPLOAD_DIR ?? path.join(process.cwd(), "uploads"),
   maxTimelineChars: Number(process.env.MAX_TIMELINE_CHARS) || 80_000,
   /** Request timeout for pipeline endpoints so long runs are never interrupted. */

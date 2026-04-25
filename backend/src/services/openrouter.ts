@@ -38,7 +38,18 @@ export async function chat(
       const content = data?.choices?.[0]?.message?.content;
       return content ?? null;
     } catch (e) {
-      lastErr = e as Error;
+      if (axios.isAxiosError(e)) {
+        const status = e.response?.status;
+        const data = e.response?.data;
+        const hint = status === 404 ? " (model not found or endpoint mismatch — try setting OPENROUTER_MODEL)" : "";
+        const details =
+          status || data
+            ? `OpenRouter request failed: ${status ?? "no_status"}${hint} :: ${typeof data === "string" ? data : JSON.stringify(data)}`
+            : `OpenRouter request failed: ${e.message}`;
+        lastErr = new Error(details);
+      } else {
+        lastErr = e as Error;
+      }
       const isRetryable =
         axios.isAxiosError(e) &&
         (e.code === "ECONNABORTED" || e.response?.status === 408 || e.response?.status === 502 || e.response?.status === 503);
