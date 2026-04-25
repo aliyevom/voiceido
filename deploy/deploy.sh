@@ -165,6 +165,8 @@ cmd_online() {
     cd $APP_DIR
     touch gcp-key.json 2>/dev/null; chmod 600 gcp-key.json 2>/dev/null
     sudo docker compose up -d --build
+    # nginx resolves upstream IPs at startup; restart to re-resolve container DNS after rebuilds
+    sudo docker compose restart nginx >/dev/null 2>&1 || true
   " || { echo "Docker compose failed."; exit 1; }
   EXTERNAL_IP=$(gcloud compute instances describe "$VM_NAME" --zone="$ZONE" --project="$PROJECT_ID" --format='get(networkInterfaces[0].accessConfigs[0].natIP)')
   echo "Online. Open: http://$EXTERNAL_IP"
