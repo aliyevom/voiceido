@@ -5,7 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import Dashboard from "@/components/Dashboard";
 import { getSessionShortId } from "@/lib/session";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default function VideoPage() {
   const router = useRouter();

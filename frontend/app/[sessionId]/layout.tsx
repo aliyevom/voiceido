@@ -1,7 +1,8 @@
 import AppShell from "@/components/AppShell";
 import { RefreshProvider } from "@/lib/RefreshContext";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+// In production behind nginx, API is same-origin at /api
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "";
 
 export default async function SessionLayout({
   children,
